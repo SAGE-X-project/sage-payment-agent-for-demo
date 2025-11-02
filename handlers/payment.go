@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/sage-x-project/sage-payment-agent-for-demo/config"
@@ -16,7 +17,7 @@ import (
 // PaymentHandler handles payment requests
 type PaymentHandler struct {
 	config     *config.Config
-	verifier   *sage.Verifier
+	verifier   sage.SignatureVerifier
 	simulator  *transaction.Simulator
 	txStats    *TransactionStats
 }
@@ -30,9 +31,28 @@ type TransactionStats struct {
 
 // NewPaymentHandler creates a new payment handler
 func NewPaymentHandler(cfg *config.Config) *PaymentHandler {
+	// Try to create RealVerifier first (uses all_keys.json)
+	var verifier sage.SignatureVerifier
+
+	keysFile := os.Getenv("PAYMENT_KEYS_FILE")
+	if keysFile == "" {
+		keysFile = "../sage-multi-agent/keys/all_keys.json"
+	}
+
+	realVerifier, err := sage.NewRealVerifier(cfg, keysFile)
+	if err != nil {
+		logger.Warn("Failed to create RealVerifier (%v), falling back to simplified verifier", err)
+		logger.Info("Using simplified signature verification (demo mode)")
+		verifier = sage.NewVerifier(cfg)
+	} else {
+		logger.Info("✅ Using RealVerifier with cryptographic signature verification")
+		logger.Info("   Keys loaded from: %s", keysFile)
+		verifier = realVerifier
+	}
+
 	return &PaymentHandler{
 		config:     cfg,
-		verifier:   sage.NewVerifier(cfg),
+		verifier:   verifier,
 		simulator:  transaction.NewSimulator(cfg),
 		txStats:    &TransactionStats{},
 	}
