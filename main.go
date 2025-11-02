@@ -27,6 +27,7 @@ func main() {
 
 	// Setup routes
 	http.HandleFunc("/payment", paymentHandler.HandlePayment)
+	http.HandleFunc("/process", paymentHandler.HandlePayment)  // Alias for /payment
 	http.HandleFunc("/health", paymentHandler.HandleHealth)
 	http.HandleFunc("/status", paymentHandler.HandleStatus)
 

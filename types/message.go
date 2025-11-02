@@ -2,7 +2,22 @@ package types
 
 import "time"
 
-// PaymentRequest represents an incoming payment request
+// AgentRequest represents the standard contract format (Root Agent -> Target Agent)
+type AgentRequest struct {
+	Intent     string                 `json:"intent"`
+	Parameters map[string]interface{} `json:"parameters"`
+	Metadata   RequestMetadata        `json:"metadata"`
+}
+
+// RequestMetadata contains common metadata for all agent requests
+type RequestMetadata struct {
+	SourceAgent string                 `json:"sourceAgent"`
+	RequestID   string                 `json:"requestId"`
+	Timestamp   string                 `json:"timestamp"`
+	UserContext map[string]interface{} `json:"userContext,omitempty"`
+}
+
+// PaymentRequest represents an incoming payment request (legacy + contract format)
 type PaymentRequest struct {
 	Amount      float64 `json:"amount"`
 	Currency    string  `json:"currency,omitempty"`
