@@ -149,9 +149,9 @@ func (rc *RegistryClient) RegisterAgent(
 	}
 	fmt.Println("  ✓ Commitment transaction mined")
 
-	// Step 3: Wait for minimum delay (shortened for testing)
-	fmt.Println("  ⏳ Waiting for commit-reveal delay...")
-	time.Sleep(2 * time.Second)
+	// Step 3: Wait for minimum delay (contract requires 60 seconds)
+	fmt.Println("  ⏳ Waiting for commit-reveal delay (60 seconds)...")
+	time.Sleep(65 * time.Second) // Wait 65 seconds to be safe (contract requires 60)
 
 	// Step 4: Reveal and register
 	fmt.Println("  📤 Revealing and registering agent...")
