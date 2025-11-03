@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/sage-x-project/sage-payment-agent-for-demo/config"
@@ -16,7 +17,7 @@ import (
 // PaymentHandler handles payment requests
 type PaymentHandler struct {
 	config     *config.Config
-	verifier   *sage.Verifier
+	verifier   sage.SignatureVerifier
 	simulator  *transaction.Simulator
 	txStats    *TransactionStats
 }
@@ -30,9 +31,28 @@ type TransactionStats struct {
 
 // NewPaymentHandler creates a new payment handler
 func NewPaymentHandler(cfg *config.Config) *PaymentHandler {
+	// Try to create RealVerifier first (uses all_keys.json)
+	var verifier sage.SignatureVerifier
+
+	keysFile := os.Getenv("PAYMENT_KEYS_FILE")
+	if keysFile == "" {
+		keysFile = "../sage-multi-agent/keys/all_keys.json"
+	}
+
+	realVerifier, err := sage.NewRealVerifier(cfg, keysFile)
+	if err != nil {
+		logger.Warn("Failed to create RealVerifier (%v), falling back to simplified verifier", err)
+		logger.Info("Using simplified signature verification (demo mode)")
+		verifier = sage.NewVerifier(cfg)
+	} else {
+		logger.Info("✅ Using RealVerifier with cryptographic signature verification")
+		logger.Info("   Keys loaded from: %s", keysFile)
+		verifier = realVerifier
+	}
+
 	return &PaymentHandler{
 		config:     cfg,
-		verifier:   sage.NewVerifier(cfg),
+		verifier:   verifier,
 		simulator:  transaction.NewSimulator(cfg),
 		txStats:    &TransactionStats{},
 	}
@@ -56,11 +76,11 @@ func (h *PaymentHandler) HandlePayment(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Parse payment request
-	var paymentReq types.PaymentRequest
-	if err := json.Unmarshal(bodyBytes, &paymentReq); err != nil {
-		logger.Error("Failed to parse JSON: %v", err)
-		h.sendError(w, http.StatusBadRequest, "invalid_json", "Failed to parse request JSON", nil)
+	// Parse payment request - try contract format first, then fallback to legacy
+	paymentReq, err := h.parsePaymentRequest(bodyBytes)
+	if err != nil {
+		logger.Error("Failed to parse request: %v", err)
+		h.sendError(w, http.StatusBadRequest, "invalid_request", err.Error(), nil)
 		return
 	}
 
@@ -147,6 +167,132 @@ func (h *PaymentHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+// parsePaymentRequest parses request in contract format or legacy format
+func (h *PaymentHandler) parsePaymentRequest(bodyBytes []byte) (types.PaymentRequest, error) {
+	// Try contract format first (Root Agent -> Target Agent)
+	var agentReq types.AgentRequest
+	if err := json.Unmarshal(bodyBytes, &agentReq); err == nil && agentReq.Intent == "payment" {
+		logger.Info("Received contract format request")
+		return h.convertFromAgentRequest(&agentReq)
+	}
+
+	// Try AgentMessage format (envelope with metadata)
+	var agentMsg map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &agentMsg); err == nil {
+		if metadata, ok := agentMsg["metadata"].(map[string]interface{}); ok {
+			// Check if this looks like a payment message with metadata
+			if hasPaymentMetadata(metadata) {
+				logger.Info("Received AgentMessage format request")
+				return h.convertFromAgentMessage(metadata)
+			}
+		}
+	}
+
+	// Fallback to legacy format
+	var paymentReq types.PaymentRequest
+	if err := json.Unmarshal(bodyBytes, &paymentReq); err != nil {
+		return types.PaymentRequest{}, err
+	}
+	logger.Info("Received legacy format request")
+	return paymentReq, nil
+}
+
+// hasPaymentMetadata checks if metadata contains payment information
+func hasPaymentMetadata(metadata map[string]interface{}) bool {
+	// Check for payment-specific keys
+	_, hasAmountKRW := metadata["amountKRW"]
+	_, hasPaymentAmount := metadata["payment.amountKRW"]
+	_, hasRecipient := metadata["recipient"]
+	_, hasTo := metadata["to"]
+
+	return hasAmountKRW || hasPaymentAmount || hasRecipient || hasTo
+}
+
+// convertFromAgentMessage converts AgentMessage metadata to PaymentRequest
+func (h *PaymentHandler) convertFromAgentMessage(metadata map[string]interface{}) (types.PaymentRequest, error) {
+	// Extract amount (KRW to float64 conversion)
+	var amount float64
+	if v, ok := metadata["amountKRW"]; ok {
+		switch val := v.(type) {
+		case float64:
+			amount = val
+		case int:
+			amount = float64(val)
+		case int64:
+			amount = float64(val)
+		}
+	} else if v, ok := metadata["payment.amountKRW"]; ok {
+		switch val := v.(type) {
+		case float64:
+			amount = val
+		case int:
+			amount = float64(val)
+		case int64:
+			amount = float64(val)
+		}
+	}
+
+	// Extract recipient
+	recipient, _ := metadata["recipient"].(string)
+	if recipient == "" {
+		recipient, _ = metadata["to"].(string)
+	}
+	if recipient == "" {
+		recipient, _ = metadata["payment.to"].(string)
+	}
+
+	// Extract product/item
+	product, _ := metadata["item"].(string)
+	if product == "" {
+		product, _ = metadata["payment.item"].(string)
+	}
+
+	// Extract method for description
+	method, _ := metadata["method"].(string)
+	if method == "" {
+		method, _ = metadata["payment.method"].(string)
+	}
+
+	return types.PaymentRequest{
+		Amount:      amount,
+		Currency:    "KRW",
+		Recipient:   recipient,
+		Product:     product,
+		Description: method,
+		Metadata:    metadata,
+	}, nil
+}
+
+// convertFromAgentRequest converts AgentRequest to PaymentRequest
+func (h *PaymentHandler) convertFromAgentRequest(agentReq *types.AgentRequest) (types.PaymentRequest, error) {
+	params := agentReq.Parameters
+
+	// Extract payment parameters
+	amount, _ := params["amount"].(float64)
+	currency, _ := params["currency"].(string)
+	recipient, _ := params["recipient"].(string)
+	product, _ := params["product"].(string)
+	description, _ := params["description"].(string)
+
+	// Default currency
+	if currency == "" {
+		currency = "KRW"
+	}
+
+	return types.PaymentRequest{
+		Amount:      amount,
+		Currency:    currency,
+		Recipient:   recipient,
+		Product:     product,
+		Description: description,
+		Metadata:    map[string]interface{}{
+			"requestId":   agentReq.Metadata.RequestID,
+			"sourceAgent": agentReq.Metadata.SourceAgent,
+			"timestamp":   agentReq.Metadata.Timestamp,
+		},
+	}, nil
 }
 
 // sendError sends an error response

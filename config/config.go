@@ -21,6 +21,11 @@ type Config struct {
 	ContractAddress string
 	ChainID        int
 
+	// ERC8004 Contract Addresses
+	IdentityRegistryAddress   string // ERC8004 Identity Registry
+	ValidationRegistryAddress string // ERC8004 Validation Registry
+	ReputationRegistryAddress string // ERC8004 Reputation Registry
+
 	// Transaction configuration
 	SimulationMode bool
 	TxDelayMs      int
@@ -57,6 +62,12 @@ func LoadConfig() *Config {
 		defaultPublicURL = "http://" + agentHost + ":" + agentPort
 	}
 
+	// Load contract addresses with fallback to CONTRACT_ADDRESS for backward compatibility
+	identityRegistry := getEnv("IDENTITY_REGISTRY_ADDRESS", "")
+	if identityRegistry == "" {
+		identityRegistry = getEnv("CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000")
+	}
+
 	return &Config{
 		// Server
 		AgentPort:      agentPort,
@@ -70,6 +81,11 @@ func LoadConfig() *Config {
 		BlockchainRPC:   getEnv("BLOCKCHAIN_RPC_URL", "http://localhost:8545"),
 		ContractAddress: getEnv("CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000"),
 		ChainID:         getEnvInt("CHAIN_ID", 31337), // 31337 for local, 11155111 for sepolia
+
+		// ERC8004 Contract Addresses
+		IdentityRegistryAddress:   identityRegistry,
+		ValidationRegistryAddress: getEnv("VALIDATION_REGISTRY_ADDRESS", "0x0000000000000000000000000000000000000000"),
+		ReputationRegistryAddress: getEnv("REPUTATION_REGISTRY_ADDRESS", "0x0000000000000000000000000000000000000000"),
 
 		// Transaction
 		SimulationMode: getEnvBool("TX_SIMULATION_MODE", true),
@@ -120,6 +136,24 @@ func (c *Config) GetTxDelay() time.Duration {
 // GetUptime returns uptime since start
 func (c *Config) GetUptime() time.Duration {
 	return time.Since(c.StartTime)
+}
+
+// GetIdentityRegistry returns the identity registry address (with backward compatibility)
+func (c *Config) GetIdentityRegistry() string {
+	if c.IdentityRegistryAddress != "" && c.IdentityRegistryAddress != "0x0000000000000000000000000000000000000000" {
+		return c.IdentityRegistryAddress
+	}
+	return c.ContractAddress
+}
+
+// GetValidationRegistry returns the validation registry address
+func (c *Config) GetValidationRegistry() string {
+	return c.ValidationRegistryAddress
+}
+
+// GetReputationRegistry returns the reputation registry address
+func (c *Config) GetReputationRegistry() string {
+	return c.ReputationRegistryAddress
 }
 
 // getEnv retrieves environment variable or returns default

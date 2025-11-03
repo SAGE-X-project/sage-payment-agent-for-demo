@@ -70,8 +70,9 @@ func (s *Simulator) validateRequest(req *types.PaymentRequest) error {
 		return fmt.Errorf("recipient address required")
 	}
 
-	// Basic Ethereum address validation (starts with 0x, 42 chars total)
-	if len(req.Recipient) < 10 {
+	// Basic recipient validation - accept any non-empty string (demo mode)
+	// In production, this should validate Ethereum address format (0x...)
+	if len(req.Recipient) < 2 {
 		return fmt.Errorf("invalid recipient address format")
 	}
 
