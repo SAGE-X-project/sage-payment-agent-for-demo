@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/sage-x-project/sage-payment-agent-for-demo/blockchain"
 	"github.com/sage-x-project/sage-payment-agent-for-demo/config"
 	"github.com/sage-x-project/sage-payment-agent-for-demo/handlers"
 	"github.com/sage-x-project/sage-payment-agent-for-demo/logger"
@@ -22,11 +23,29 @@ func main() {
 	// Log startup information
 	logger.LogStartup(cfg.AgentPort, cfg.IsSAGEEnabled())
 
+	// Initialize agent (keys and blockchain)
+	agentInit, err := blockchain.NewAgentInitializer(cfg)
+	if err != nil {
+		logger.Error("Failed to initialize agent: %v", err)
+		os.Exit(1)
+	}
+	defer agentInit.Cleanup()
+
+	// Print agent info
+	fmt.Println(agentInit.GetAgentInfo())
+
+	// Register on blockchain if auto-register is enabled
+	if err := agentInit.RegisterIfNeeded(); err != nil {
+		logger.Error("Failed to register agent: %v", err)
+		// Don't exit - continue without blockchain registration
+	}
+
 	// Create payment handler
 	paymentHandler := handlers.NewPaymentHandler(cfg)
 
 	// Setup routes
 	http.HandleFunc("/payment", paymentHandler.HandlePayment)
+	http.HandleFunc("/process", paymentHandler.HandlePayment)  // Alias for /payment
 	http.HandleFunc("/health", paymentHandler.HandleHealth)
 	http.HandleFunc("/status", paymentHandler.HandleStatus)
 

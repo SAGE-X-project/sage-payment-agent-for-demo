@@ -9,19 +9,42 @@ import (
 // Config holds all configuration for the payment agent
 type Config struct {
 	// Server configuration
-	AgentPort string
-	LogLevel  string
+	AgentPort      string
+	AgentHost      string
+	AgentPublicURL string // Public URL for agent discovery and contract registration
+	LogLevel       string
 
 	// SAGE Protocol configuration
 	SAGEEnabled    bool
 	StrictMode     bool
 	BlockchainRPC  string
 	ContractAddress string
+	ChainID        int
+
+	// ERC8004 Contract Addresses
+	IdentityRegistryAddress   string // ERC8004 Identity Registry
+	ValidationRegistryAddress string // ERC8004 Validation Registry
+	ReputationRegistryAddress string // ERC8004 Reputation Registry
 
 	// Transaction configuration
 	SimulationMode bool
 	TxDelayMs      int
 	WalletAddress  string
+
+	// Agent identity & keys
+	AgentDID          string
+	PrivateKeyPath    string
+	AgentPrivateKey   string
+	KeystorePath      string
+	KeystorePassword  string
+	AgentJWKFile      string
+	AgentKEMJWKFile   string
+
+	// Agent registry
+	AutoRegister      bool
+	AgentName         string
+	AgentDescription  string
+	AgentCapabilities string
 
 	// Agent metadata
 	AgentVersion string
@@ -30,21 +53,59 @@ type Config struct {
 
 // LoadConfig reads configuration from environment variables
 func LoadConfig() *Config {
+	agentPort := getEnv("AGENT_PORT", "8091")
+	agentHost := getEnv("AGENT_HOST", "0.0.0.0")
+
+	// Generate default public URL if not provided
+	defaultPublicURL := "http://localhost:" + agentPort
+	if agentHost != "0.0.0.0" && agentHost != "localhost" {
+		defaultPublicURL = "http://" + agentHost + ":" + agentPort
+	}
+
+	// Load contract addresses with fallback to CONTRACT_ADDRESS for backward compatibility
+	identityRegistry := getEnv("IDENTITY_REGISTRY_ADDRESS", "")
+	if identityRegistry == "" {
+		identityRegistry = getEnv("CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000")
+	}
+
 	return &Config{
 		// Server
-		AgentPort: getEnv("AGENT_PORT", "8091"),
-		LogLevel:  getEnv("LOG_LEVEL", "info"),
+		AgentPort:      agentPort,
+		AgentHost:      agentHost,
+		AgentPublicURL: getEnv("AGENT_PUBLIC_URL", defaultPublicURL),
+		LogLevel:       getEnv("LOG_LEVEL", "info"),
 
 		// SAGE Protocol
 		SAGEEnabled:     getEnvBool("SAGE_ENABLED", true),
 		StrictMode:      getEnvBool("SAGE_STRICT_MODE", true),
 		BlockchainRPC:   getEnv("BLOCKCHAIN_RPC_URL", "http://localhost:8545"),
 		ContractAddress: getEnv("CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000"),
+		ChainID:         getEnvInt("CHAIN_ID", 31337), // 31337 for local, 11155111 for sepolia
+
+		// ERC8004 Contract Addresses
+		IdentityRegistryAddress:   identityRegistry,
+		ValidationRegistryAddress: getEnv("VALIDATION_REGISTRY_ADDRESS", "0x0000000000000000000000000000000000000000"),
+		ReputationRegistryAddress: getEnv("REPUTATION_REGISTRY_ADDRESS", "0x0000000000000000000000000000000000000000"),
 
 		// Transaction
 		SimulationMode: getEnvBool("TX_SIMULATION_MODE", true),
 		TxDelayMs:      getEnvInt("TX_DELAY_MS", 500),
 		WalletAddress:  getEnv("WALLET_ADDRESS", "0x1234567890abcdef1234567890abcdef12345678"),
+
+		// Agent identity & keys
+		AgentDID:         getEnv("AGENT_DID", ""),
+		PrivateKeyPath:   getEnv("PRIVATE_KEY_PATH", "./keys/agent.key"),
+		AgentPrivateKey:  getEnv("AGENT_PRIVATE_KEY", ""),
+		KeystorePath:     getEnv("KEYSTORE_PATH", ""),
+		KeystorePassword: getEnv("KEYSTORE_PASSWORD", ""),
+		AgentJWKFile:     getEnv("AGENT_JWK_FILE", "./keys/payment.jwk"),
+		AgentKEMJWKFile:  getEnv("AGENT_KEM_JWK_FILE", "./keys/kem/payment.x25519.jwk"),
+
+		// Agent registry
+		AutoRegister:      getEnvBool("AUTO_REGISTER", true),
+		AgentName:         getEnv("AGENT_NAME", "Official Payment Agent"),
+		AgentDescription:  getEnv("AGENT_DESCRIPTION", "Blockchain-based secure payment processing agent"),
+		AgentCapabilities: getEnv("AGENT_CAPABILITIES", "crypto_payment,stablecoin,rfc9421_signature,hpke_encryption"),
 
 		// Metadata
 		AgentVersion: "1.0.0",
@@ -75,6 +136,24 @@ func (c *Config) GetTxDelay() time.Duration {
 // GetUptime returns uptime since start
 func (c *Config) GetUptime() time.Duration {
 	return time.Since(c.StartTime)
+}
+
+// GetIdentityRegistry returns the identity registry address (with backward compatibility)
+func (c *Config) GetIdentityRegistry() string {
+	if c.IdentityRegistryAddress != "" && c.IdentityRegistryAddress != "0x0000000000000000000000000000000000000000" {
+		return c.IdentityRegistryAddress
+	}
+	return c.ContractAddress
+}
+
+// GetValidationRegistry returns the validation registry address
+func (c *Config) GetValidationRegistry() string {
+	return c.ValidationRegistryAddress
+}
+
+// GetReputationRegistry returns the reputation registry address
+func (c *Config) GetReputationRegistry() string {
+	return c.ReputationRegistryAddress
 }
 
 // getEnv retrieves environment variable or returns default
